@@ -1,9 +1,8 @@
-import { Source } from "@prisma/client";
 import { SourceConfig } from "@/app/lib/types";
 
 export const SOURCE_CONFIGS: SourceConfig[] = [
   {
-    source: Source.KATHIMERINI,
+    source: "KATHIMERINI",
     domain: "kathimerini.gr",
     baseUrl: "https://www.kathimerini.gr",
     feeds: [
@@ -18,7 +17,7 @@ export const SOURCE_CONFIGS: SourceConfig[] = [
     ]
   },
   {
-    source: Source.NAFTEMPORIKI,
+    source: "NAFTEMPORIKI",
     domain: "naftemporiki.gr",
     baseUrl: "https://www.naftemporiki.gr",
     feeds: [
@@ -33,7 +32,7 @@ export const SOURCE_CONFIGS: SourceConfig[] = [
     ]
   },
   {
-    source: Source.OT,
+    source: "OT",
     domain: "ot.gr",
     baseUrl: "https://www.ot.gr",
     feeds: ["https://www.ot.gr/feed/", "https://www.ot.gr/category/economy/feed/"],
@@ -44,8 +43,3 @@ export const SOURCE_CONFIGS: SourceConfig[] = [
     ]
   }
 ];
-
-export function sourceFromDomain(domain: string): Source | null {
-  const match = SOURCE_CONFIGS.find((item) => domain.endsWith(item.domain));
-  return match?.source ?? null;
-}

@@ -1,34 +1,19 @@
-import { prisma } from "@/app/lib/db/prisma";
-import { findNearDuplicate } from "@/app/lib/ingestion/dedupe";
+import { RefreshSnapshot } from "@/app/lib/domain";
+import { dedupeEnrichedArticles } from "@/app/lib/ingestion/dedupe";
 import { discoverCandidates, extractArticle } from "@/app/lib/ingestion/fetch";
 import { toEnrichedArticle } from "@/app/lib/ingestion/transform";
-import { RefreshStats } from "@/app/lib/types";
 
-let runLock = false;
+let runningPromise: Promise<RefreshSnapshot> | null = null;
 
-async function upsertArticle(item: ReturnType<typeof toEnrichedArticle>): Promise<"inserted" | "updated"> {
-  const existing = await prisma.article.findUnique({ where: { url: item.url } });
-
-  if (!existing) {
-    await prisma.article.create({
-      data: {
-        ...item,
-        tags: item.tags
-      }
-    });
-    return "inserted";
-  }
-
-  await prisma.article.update({
-    where: { id: existing.id },
-    data: {
-      ...item,
-      tags: item.tags
-    }
-  });
-
-  return "updated";
-}
+let lastSnapshot: RefreshSnapshot = {
+  status: "IDLE",
+  mode: "idle",
+  startedAt: null,
+  finishedAt: null,
+  message: "Δεν έχει γίνει ακόμα ανανέωση.",
+  stats: { scanned: 0, accepted: 0, deduped: 0 },
+  rows: []
+};
 
 async function runWithConcurrency<T>(
   items: T[],
@@ -48,93 +33,89 @@ async function runWithConcurrency<T>(
   await Promise.all(Array.from({ length: Math.min(limit, items.length) }, () => consume()));
 }
 
-export async function runRefreshJob(mode: string = "manual") {
-  if (runLock) {
-    return { skipped: true, reason: "refresh already running" };
-  }
+export async function runRefreshJob(mode: string = "manual"): Promise<RefreshSnapshot> {
+  if (runningPromise) return runningPromise;
 
-  runLock = true;
+  const startedAt = new Date();
 
-  const refresh = await prisma.refreshRun.create({
-    data: {
-      status: "RUNNING",
-      mode
-    }
-  });
-
-  const stats: RefreshStats = {
-    scanned: 0,
-    inserted: 0,
-    updated: 0,
-    deduped: 0
+  lastSnapshot = {
+    ...lastSnapshot,
+    status: "RUNNING",
+    mode,
+    startedAt: startedAt.toISOString(),
+    finishedAt: null,
+    message: "Σε εξέλιξη ανανέωση...",
+    error: undefined
   };
 
-  try {
-    const candidates = await discoverCandidates();
-    const limited = candidates.slice(0, 180);
+  runningPromise = (async () => {
+    let scanned = 0;
+    const enrichedRows: ReturnType<typeof toEnrichedArticle>[] = [];
 
-    await runWithConcurrency(limited, 5, async (candidate) => {
-      stats.scanned += 1;
+    try {
+      const candidates = (await discoverCandidates()).slice(0, 180);
 
-      const extracted = await extractArticle(candidate);
-      if (!extracted) return;
+      await runWithConcurrency(candidates, 5, async (candidate) => {
+        scanned += 1;
+        const extracted = await extractArticle(candidate);
+        if (!extracted) return;
+        enrichedRows.push(toEnrichedArticle(extracted));
+      });
 
-      const enriched = toEnrichedArticle(extracted);
-      const nearDuplicate = await findNearDuplicate(enriched);
+      const deduped = dedupeEnrichedArticles(enrichedRows);
+      const sorted = deduped.rows
+        .sort((a, b) => b.impactScore - a.impactScore || b.publishedAt.getTime() - a.publishedAt.getTime())
+        .slice(0, 180)
+        .map((row) => ({
+          ...row,
+          publishedAt: row.publishedAt.toISOString(),
+          fetchedAt: row.fetchedAt.toISOString()
+        }));
 
-      if (nearDuplicate && nearDuplicate.url !== enriched.url) {
-        stats.deduped += 1;
-        return;
-      }
-
-      const result = await upsertArticle(enriched);
-      if (result === "inserted") stats.inserted += 1;
-      if (result === "updated") stats.updated += 1;
-    });
-
-    await prisma.refreshRun.update({
-      where: { id: refresh.id },
-      data: {
+      lastSnapshot = {
         status: "COMPLETED",
-        message: `Processed ${stats.scanned} candidates`,
-        scanned: stats.scanned,
-        inserted: stats.inserted,
-        updated: stats.updated,
-        deduped: stats.deduped,
-        finishedAt: new Date()
-      }
-    });
+        mode,
+        startedAt: startedAt.toISOString(),
+        finishedAt: new Date().toISOString(),
+        message: `Επεξεργασία ${scanned} υποψηφίων ειδήσεων`,
+        stats: {
+          scanned,
+          accepted: sorted.length,
+          deduped: deduped.deduped
+        },
+        rows: sorted
+      };
 
-    return {
-      refreshId: refresh.id,
-      ...stats,
-      skipped: false
-    };
-  } catch (error) {
-    await prisma.refreshRun.update({
-      where: { id: refresh.id },
-      data: {
+      return lastSnapshot;
+    } catch (error) {
+      lastSnapshot = {
+        ...lastSnapshot,
         status: "FAILED",
-        message: "Refresh failed",
+        mode,
+        finishedAt: new Date().toISOString(),
+        message: "Αποτυχία ανανέωσης",
         error: error instanceof Error ? error.message : "Unknown error",
-        scanned: stats.scanned,
-        inserted: stats.inserted,
-        updated: stats.updated,
-        deduped: stats.deduped,
-        finishedAt: new Date()
-      }
-    });
+        stats: {
+          scanned,
+          accepted: 0,
+          deduped: 0
+        }
+      };
 
-    throw error;
-  } finally {
-    runLock = false;
-  }
+      return lastSnapshot;
+    } finally {
+      runningPromise = null;
+    }
+  })();
+
+  return runningPromise;
 }
 
-export async function seedIfEmpty() {
-  const count = await prisma.article.count();
-  if (count > 0) return { seeded: false };
+export async function ensureSnapshot(): Promise<RefreshSnapshot> {
+  if (lastSnapshot.rows.length > 0) return lastSnapshot;
+  return runRefreshJob("auto");
+}
 
-  const result = await runRefreshJob("bootstrap");
-  return { seeded: true, result };
+export function getSnapshot(): RefreshSnapshot {
+  return lastSnapshot;
 }

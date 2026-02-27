@@ -1,19 +1,11 @@
 "use client";
 
-import { Category, Source, type Article, type RefreshRun } from "@prisma/client";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { ArticleCard } from "@/app/components/article-card";
+import { Category, RadarArticle, RefreshSnapshot, Source } from "@/app/lib/domain";
 
-type DashboardView = "today" | "brief" | "archive";
+type DashboardView = "today" | "brief";
 type DateRange = "today" | "3d" | "7d" | "custom";
-
-type StatusResponse = {
-  last: RefreshRun | null;
-};
-
-type ArticleResponse = {
-  rows: Article[];
-};
 
 const CATEGORY_LABELS: Record<Category, string> = {
   TRADE: "Trade",
@@ -30,12 +22,79 @@ const SOURCE_LABELS: Record<Source, string> = {
 };
 
 const CATEGORY_ORDER: Category[] = [
-  Category.TRADE,
-  Category.TRANSPORT_LOGISTICS,
-  Category.ECONOMICS_BUSINESS_MARKETS,
-  Category.GEOPOLITICS_SECURITY_ENERGY,
-  Category.MAJOR_DAILY_GREEK_NEWS
+  "TRADE",
+  "TRANSPORT_LOGISTICS",
+  "ECONOMICS_BUSINESS_MARKETS",
+  "GEOPOLITICS_SECURITY_ENERGY",
+  "MAJOR_DAILY_GREEK_NEWS"
 ];
+
+function parseDate(value?: string | null): Date | null {
+  if (!value) return null;
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function applyFilters(
+  rows: RadarArticle[],
+  options: {
+    range: DateRange;
+    fromDate: string;
+    toDate: string;
+    search: string;
+    category: "" | Category;
+    source: "" | Source;
+    minImpact: number;
+    tags: string[];
+  }
+): RadarArticle[] {
+  const now = Date.now();
+
+  return rows.filter((row) => {
+    const publishedAt = parseDate(row.publishedAt)?.getTime() ?? 0;
+
+    if (options.range === "today" && publishedAt < now - 24 * 60 * 60 * 1000) return false;
+    if (options.range === "3d" && publishedAt < now - 3 * 24 * 60 * 60 * 1000) return false;
+    if (options.range === "7d" && publishedAt < now - 7 * 24 * 60 * 60 * 1000) return false;
+
+    if (options.range === "custom") {
+      const from = options.fromDate ? new Date(`${options.fromDate}T00:00:00`).getTime() : null;
+      const to = options.toDate ? new Date(`${options.toDate}T23:59:59`).getTime() : null;
+      if (from && publishedAt < from) return false;
+      if (to && publishedAt > to) return false;
+    }
+
+    if (options.search.trim()) {
+      const q = options.search.trim().toLowerCase();
+      const haystack = `${row.title} ${row.summaryEl} ${row.scoreRationale}`.toLowerCase();
+      if (!haystack.includes(q)) return false;
+    }
+
+    if (options.category && row.category !== options.category) return false;
+    if (options.source && row.source !== options.source) return false;
+    if (row.impactScore < options.minImpact) return false;
+    if (options.tags.length > 0 && !options.tags.every((tag) => row.tags.includes(tag))) return false;
+
+    return true;
+  });
+}
+
+function todayDigest(rows: RadarArticle[]): RadarArticle[] {
+  const grouped = new Map<Category, RadarArticle[]>();
+
+  for (const row of rows) {
+    const list = grouped.get(row.category) ?? [];
+    list.push(row);
+    grouped.set(row.category, list);
+  }
+
+  return CATEGORY_ORDER.flatMap((category) => {
+    const list = grouped.get(category) ?? [];
+    return list
+      .sort((a, b) => b.impactScore - a.impactScore || Date.parse(b.publishedAt) - Date.parse(a.publishedAt))
+      .slice(0, 3);
+  }).slice(0, 15);
+}
 
 export function Dashboard() {
   const [view, setView] = useState<DashboardView>("today");
@@ -47,88 +106,74 @@ export function Dashboard() {
   const [source, setSource] = useState<"" | Source>("");
   const [minImpact, setMinImpact] = useState(0);
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
-  const [rows, setRows] = useState<Article[]>([]);
+  const [allRows, setAllRows] = useState<RadarArticle[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [lastRefresh, setLastRefresh] = useState<RefreshRun | null>(null);
-  const prevRefreshStatus = useRef<string | null>(null);
+  const [lastRun, setLastRun] = useState<RefreshSnapshot | null>(null);
+
+  const filteredRows = useMemo(
+    () =>
+      applyFilters(allRows, {
+        range,
+        fromDate,
+        toDate,
+        search,
+        category,
+        source,
+        minImpact,
+        tags: selectedTags
+      }),
+    [allRows, range, fromDate, toDate, search, category, source, minImpact, selectedTags]
+  );
+
+  const visibleRows = useMemo(() => {
+    if (view === "brief") {
+      return [...filteredRows]
+        .sort((a, b) => b.impactScore - a.impactScore || Date.parse(b.publishedAt) - Date.parse(a.publishedAt))
+        .slice(0, 5);
+    }
+
+    return todayDigest(filteredRows);
+  }, [view, filteredRows]);
 
   const allTags = useMemo(() => {
     const tags = new Set<string>();
-    for (const row of rows) {
-      const itemTags = Array.isArray(row.tags) ? row.tags.map(String) : [];
-      itemTags.forEach((tag) => tags.add(tag));
-    }
+    filteredRows.forEach((row) => row.tags.forEach((tag) => tags.add(tag)));
     return Array.from(tags).slice(0, 20);
-  }, [rows]);
+  }, [filteredRows]);
 
   const grouped = useMemo(() => {
-    const map = new Map<Category, Article[]>();
-    rows.forEach((row) => {
+    const map = new Map<Category, RadarArticle[]>();
+    visibleRows.forEach((row) => {
       const list = map.get(row.category) ?? [];
       list.push(row);
       map.set(row.category, list);
     });
     return map;
-  }, [rows]);
+  }, [visibleRows]);
 
-  async function fetchArticles() {
-    setLoading(true);
-    const params = new URLSearchParams({
-      view,
-      range: view === "archive" ? "archive" : range,
-      q: search,
-      minImpact: String(minImpact)
-    });
+  async function load(mode: "auto" | "manual") {
+    if (mode === "manual") setRefreshing(true);
+    else setLoading(true);
 
-    if (category) params.set("category", category);
-    if (source) params.set("source", source);
-    if (selectedTags.length > 0) params.set("tags", selectedTags.join(","));
-    if (range === "custom") {
-      if (fromDate) params.set("from", new Date(fromDate).toISOString());
-      if (toDate) params.set("to", new Date(toDate).toISOString());
+    try {
+      const response = await fetch("/api/refresh", {
+        method: mode === "manual" ? "POST" : "GET",
+        cache: "no-store"
+      });
+
+      const data: RefreshSnapshot = await response.json();
+      setAllRows(data.rows ?? []);
+      setLastRun(data);
+    } finally {
+      setRefreshing(false);
+      setLoading(false);
     }
-
-    const res = await fetch(`/api/articles?${params.toString()}`, { cache: "no-store" });
-    const data: ArticleResponse = await res.json();
-    setRows(data.rows ?? []);
-    setLoading(false);
-  }
-
-  async function fetchRefreshStatus() {
-    const res = await fetch("/api/refresh/status", { cache: "no-store" });
-    const data: StatusResponse = await res.json();
-    setLastRefresh(data.last);
-    const currentStatus = data.last?.status ?? null;
-    setRefreshing(currentStatus === "RUNNING");
-
-    if (prevRefreshStatus.current === "RUNNING" && currentStatus !== "RUNNING") {
-      fetchArticles().catch(() => undefined);
-    }
-
-    prevRefreshStatus.current = currentStatus;
-  }
-
-  async function triggerRefresh() {
-    setRefreshing(true);
-    await fetch("/api/refresh", { method: "POST" });
-    fetchRefreshStatus().catch(() => undefined);
   }
 
   useEffect(() => {
-    fetchArticles().catch(() => setLoading(false));
-  }, [view, range, search, category, source, minImpact, selectedTags.join(","), fromDate, toDate]);
-
-  useEffect(() => {
-    fetchRefreshStatus().catch(() => undefined);
+    load("auto").catch(() => setLoading(false));
   }, []);
-
-  useEffect(() => {
-    const id = setInterval(() => {
-      fetchRefreshStatus().catch(() => undefined);
-    }, refreshing ? 4500 : 20_000);
-    return () => clearInterval(id);
-  }, [refreshing]);
 
   return (
     <div className="min-h-screen bg-[radial-gradient(circle_at_top,#E8F1F5_0%,#F8FAFB_45%,#EEF5F8_100%)] text-slate-900">
@@ -137,10 +182,10 @@ export function Dashboard() {
           <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
             <div>
               <h1 className="text-2xl font-bold text-radar-ink">Greek News Radar</h1>
-              <p className="text-sm text-slate-600">Καθημερινή χαρτογράφηση ελληνικών ειδήσεων με impact scoring</p>
+              <p className="text-sm text-slate-600">On-demand refresh χωρίς αποθήκευση ιστορικού</p>
             </div>
             <button
-              onClick={triggerRefresh}
+              onClick={() => load("manual")}
               disabled={refreshing}
               className="rounded-lg bg-radar-signal px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
             >
@@ -149,33 +194,19 @@ export function Dashboard() {
           </div>
 
           <div className="grid gap-3 md:grid-cols-5">
-            <select
-              className="rounded-lg border p-2"
-              value={view}
-              onChange={(e) => setView(e.target.value as DashboardView)}
-            >
+            <select className="rounded-lg border p-2" value={view} onChange={(e) => setView(e.target.value as DashboardView)}>
               <option value="today">Today digest</option>
               <option value="brief">Daily Brief</option>
-              <option value="archive">Archive</option>
             </select>
 
-            <select
-              className="rounded-lg border p-2"
-              value={range}
-              onChange={(e) => setRange(e.target.value as DateRange)}
-            >
+            <select className="rounded-lg border p-2" value={range} onChange={(e) => setRange(e.target.value as DateRange)}>
               <option value="today">Today</option>
               <option value="3d">Last 3 days</option>
               <option value="7d">Last 7 days</option>
               <option value="custom">Custom</option>
             </select>
 
-            <input
-              className="rounded-lg border p-2"
-              value={search}
-              placeholder="Search"
-              onChange={(e) => setSearch(e.target.value)}
-            />
+            <input className="rounded-lg border p-2" value={search} placeholder="Search" onChange={(e) => setSearch(e.target.value)} />
 
             <input
               type="date"
@@ -195,8 +226,9 @@ export function Dashboard() {
           </div>
 
           <p className="mt-3 text-xs text-slate-500">
-            Last refresh: {lastRefresh ? new Date(lastRefresh.startedAt).toLocaleString("el-GR") : "-"}
-            {lastRefresh?.status ? ` (${lastRefresh.status})` : ""}
+            Last refresh: {lastRun?.finishedAt ? new Date(lastRun.finishedAt).toLocaleString("el-GR") : "-"}
+            {lastRun?.status ? ` (${lastRun.status})` : ""}
+            {lastRun?.stats ? ` | scanned ${lastRun.stats.scanned}, kept ${lastRun.stats.accepted}` : ""}
           </p>
         </header>
 
@@ -205,11 +237,7 @@ export function Dashboard() {
             <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-slate-600">Filters</h2>
 
             <label className="mb-2 block text-sm font-medium">Category</label>
-            <select
-              className="mb-4 w-full rounded-lg border p-2"
-              value={category}
-              onChange={(e) => setCategory(e.target.value as "" | Category)}
-            >
+            <select className="mb-4 w-full rounded-lg border p-2" value={category} onChange={(e) => setCategory(e.target.value as "" | Category)}>
               <option value="">All</option>
               {Object.entries(CATEGORY_LABELS).map(([key, label]) => (
                 <option key={key} value={key}>
@@ -219,11 +247,7 @@ export function Dashboard() {
             </select>
 
             <label className="mb-2 block text-sm font-medium">Source</label>
-            <select
-              className="mb-4 w-full rounded-lg border p-2"
-              value={source}
-              onChange={(e) => setSource(e.target.value as "" | Source)}
-            >
+            <select className="mb-4 w-full rounded-lg border p-2" value={source} onChange={(e) => setSource(e.target.value as "" | Source)}>
               <option value="">All</option>
               {Object.entries(SOURCE_LABELS).map(([key, label]) => (
                 <option key={key} value={key}>
@@ -268,13 +292,13 @@ export function Dashboard() {
           <main className="space-y-5">
             {loading ? (
               <div className="rounded-xl border bg-white p-6 text-sm text-slate-600">Loading…</div>
-            ) : rows.length === 0 ? (
+            ) : visibleRows.length === 0 ? (
               <div className="rounded-xl border bg-white p-6 text-sm text-slate-600">No items found.</div>
             ) : view === "brief" ? (
               <section className="rounded-2xl border border-white/40 bg-white/85 p-4 shadow">
                 <h2 className="mb-3 text-lg font-semibold">Daily Brief (Top 5)</h2>
                 <div className="space-y-3">
-                  {rows.slice(0, 5).map((row) => (
+                  {visibleRows.map((row) => (
                     <div key={row.id} className="rounded-lg border border-slate-200 p-3">
                       <a href={row.url} target="_blank" rel="noreferrer" className="font-semibold text-radar-sea">
                         {row.title}
@@ -283,25 +307,6 @@ export function Dashboard() {
                       <p className="mt-1 text-xs text-slate-500">
                         {CATEGORY_LABELS[row.category]} | Score {row.impactScore}
                       </p>
-                    </div>
-                  ))}
-                </div>
-              </section>
-            ) : view === "archive" ? (
-              <section className="rounded-2xl border border-white/40 bg-white/85 p-4 shadow">
-                <h2 className="mb-3 text-lg font-semibold">Archive (30 days)</h2>
-                <div className="space-y-2">
-                  {rows.map((row) => (
-                    <div key={row.id} className="grid gap-2 rounded-lg border border-slate-200 p-3 md:grid-cols-[1fr_auto]">
-                      <div>
-                        <a href={row.url} target="_blank" rel="noreferrer" className="font-medium text-radar-sea">
-                          {row.title}
-                        </a>
-                        <p className="text-xs text-slate-500">
-                          {SOURCE_LABELS[row.source]} | {new Date(row.publishedAt).toLocaleString("el-GR")} | {CATEGORY_LABELS[row.category]}
-                        </p>
-                      </div>
-                      <div className="text-right text-sm font-semibold">{row.impactScore}</div>
                     </div>
                   ))}
                 </div>

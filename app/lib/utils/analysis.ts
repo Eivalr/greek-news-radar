@@ -1,9 +1,9 @@
-import { Category, Confidence } from "@prisma/client";
+import { Category, Confidence } from "@/app/lib/domain";
 import { compact, normalizeText, splitSentences } from "@/app/lib/utils/text";
 
 const CATEGORY_RULES: Array<{ category: Category; keywords: string[] }> = [
   {
-    category: Category.TRANSPORT_LOGISTICS,
+    category: "TRANSPORT_LOGISTICS",
     keywords: [
       "λιμάνι",
       "ναυτιλία",
@@ -20,20 +20,11 @@ const CATEGORY_RULES: Array<{ category: Category; keywords: string[] }> = [
     ]
   },
   {
-    category: Category.TRADE,
-    keywords: [
-      "εξαγωγ",
-      "εισαγωγ",
-      "trade",
-      "δασμ",
-      "tariff",
-      "εμπόριο",
-      "τελωνεια",
-      "ανταγωνισ"
-    ]
+    category: "TRADE",
+    keywords: ["εξαγωγ", "εισαγωγ", "trade", "δασμ", "tariff", "εμπόριο", "τελωνεια", "ανταγωνισ"]
   },
   {
-    category: Category.ECONOMICS_BUSINESS_MARKETS,
+    category: "ECONOMICS_BUSINESS_MARKETS",
     keywords: [
       "οικονομ",
       "αγορά",
@@ -47,7 +38,7 @@ const CATEGORY_RULES: Array<{ category: Category; keywords: string[] }> = [
     ]
   },
   {
-    category: Category.GEOPOLITICS_SECURITY_ENERGY,
+    category: "GEOPOLITICS_SECURITY_ENERGY",
     keywords: [
       "ενέργ",
       "γεωπολιτ",
@@ -79,10 +70,7 @@ export function classifyCategory(title: string, body: string): Category {
     }
   }
 
-  if (!best || best.score === 0) {
-    return Category.MAJOR_DAILY_GREEK_NEWS;
-  }
-
+  if (!best || best.score === 0) return "MAJOR_DAILY_GREEK_NEWS";
   return best.category;
 }
 
@@ -94,8 +82,7 @@ export function buildSummaryEl(title: string, accessibleText: string, snippet: s
     return compact(`${title}. ${snippet}`.trim(), 420);
   }
 
-  const selection = sentences.slice(0, 3);
-  return compact(selection.join(" "), 420);
+  return compact(sentences.slice(0, 3).join(" "), 420);
 }
 
 function buildGroundedBullet(prefix: string, text: string): string {
@@ -113,7 +100,7 @@ export function buildImpacts(
   impactPersonal: string;
 } {
   const fact = splitSentences(`${summaryEl} ${snippet}`)[0] ?? compact(summaryEl || snippet, 130);
-  const confidenceNote = confidence === Confidence.LOW ? " Περιορισμένη πρόσβαση σε πλήρες κείμενο." : "";
+  const confidenceNote = confidence === "LOW" ? " Περιορισμένη πρόσβαση σε πλήρες κείμενο." : "";
 
   const greece = [
     buildGroundedBullet("- Το δημοσίευμα επισημαίνει: ", fact),
@@ -122,7 +109,7 @@ export function buildImpacts(
 
   const business = [
     buildGroundedBullet("- Επιχειρηματικό σήμα: ", fact),
-    category === Category.TRANSPORT_LOGISTICS
+    category === "TRANSPORT_LOGISTICS"
       ? "- Αυξημένη ανάγκη για αναπροσαρμογή SLA, δρομολογίων ή χωρητικότητας."
       : "- Απαιτείται παρακολούθηση κόστους, ρίσκου και συμμόρφωσης."
   ];
@@ -160,16 +147,16 @@ export function deriveTags(title: string, summaryEl: string, category: Category)
   if (normalized.includes("τελων")) tags.add("τελωνεία");
 
   switch (category) {
-    case Category.TRADE:
+    case "TRADE":
       tags.add("trade");
       break;
-    case Category.TRANSPORT_LOGISTICS:
+    case "TRANSPORT_LOGISTICS":
       tags.add("logistics");
       break;
-    case Category.ECONOMICS_BUSINESS_MARKETS:
+    case "ECONOMICS_BUSINESS_MARKETS":
       tags.add("markets");
       break;
-    case Category.GEOPOLITICS_SECURITY_ENERGY:
+    case "GEOPOLITICS_SECURITY_ENERGY":
       tags.add("geopolitics");
       break;
     default:
@@ -187,14 +174,13 @@ export function impactScoreFromContent(
   const normalized = normalizeText(text);
   let score = 35;
 
-  const now = Date.now();
-  const ageHours = Math.max(0, (now - publishedAt.getTime()) / 3_600_000);
+  const ageHours = Math.max(0, (Date.now() - publishedAt.getTime()) / 3_600_000);
   score += ageHours <= 12 ? 20 : ageHours <= 24 ? 14 : ageHours <= 48 ? 8 : 0;
 
-  if (category === Category.TRANSPORT_LOGISTICS) score += 20;
-  if (category === Category.TRADE) score += 16;
-  if (category === Category.ECONOMICS_BUSINESS_MARKETS) score += 12;
-  if (category === Category.GEOPOLITICS_SECURITY_ENERGY) score += 12;
+  if (category === "TRANSPORT_LOGISTICS") score += 20;
+  if (category === "TRADE") score += 16;
+  if (category === "ECONOMICS_BUSINESS_MARKETS") score += 12;
+  if (category === "GEOPOLITICS_SECURITY_ENERGY") score += 12;
 
   const magnitudeSignals = ["κόστος", "ρίσκο", "δασμ", "κυρώσ", "τιμή", "καθυστέρη", "compliance"];
   const magnitudeHits = magnitudeSignals.reduce(
@@ -205,10 +191,11 @@ export function impactScoreFromContent(
 
   const bounded = Math.max(0, Math.min(100, score));
 
-  const rationale =
-    ageHours <= 24
-      ? "Υψηλή προτεραιότητα λόγω άμεσης επικαιρότητας και επιχειρησιακής συνάφειας."
-      : "Η βαθμολογία αντανακλά τη θεματική συνάφεια και το πιθανό λειτουργικό αποτύπωμα.";
-
-  return { score: bounded, rationale };
+  return {
+    score: bounded,
+    rationale:
+      ageHours <= 24
+        ? "Υψηλή προτεραιότητα λόγω άμεσης επικαιρότητας και επιχειρησιακής συνάφειας."
+        : "Η βαθμολογία αντανακλά τη θεματική συνάφεια και το πιθανό λειτουργικό αποτύπωμα."
+  };
 }

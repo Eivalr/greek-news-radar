@@ -1,4 +1,3 @@
-import { Category, Confidence } from "@prisma/client";
 import { EnrichedArticle, ExtractedArticle } from "@/app/lib/types";
 import {
   buildImpacts,
@@ -9,9 +8,9 @@ import {
 } from "@/app/lib/utils/analysis";
 import { compact, computeHash } from "@/app/lib/utils/text";
 
-function confidenceFromContent(current: Confidence, accessibleText: string): Confidence {
-  if (accessibleText.length > 1300) return Confidence.HIGH;
-  if (current === Confidence.LOW && accessibleText.length > 300) return Confidence.MED;
+function confidenceFromContent(current: ExtractedArticle["confidence"], accessibleText: string) {
+  if (accessibleText.length > 1300) return "HIGH" as const;
+  if (current === "LOW" && accessibleText.length > 300) return "MED" as const;
   return current;
 }
 
@@ -25,14 +24,14 @@ function trimBullets(input: string): string {
 }
 
 export function toEnrichedArticle(item: ExtractedArticle): EnrichedArticle {
-  const category: Category = classifyCategory(item.title, `${item.accessibleText} ${item.snippet}`);
+  const category = classifyCategory(item.title, `${item.accessibleText} ${item.snippet}`);
   const summaryEl = buildSummaryEl(item.title, item.accessibleText, item.snippet);
   const confidence = confidenceFromContent(item.confidence, item.accessibleText);
   const impacts = buildImpacts(summaryEl, item.snippet, category, confidence);
   const score = impactScoreFromContent(category, item.publishedAt, `${item.title} ${summaryEl} ${item.accessibleText}`);
-  const tags = deriveTags(item.title, summaryEl, category);
 
   return {
+    id: computeHash([item.url]).slice(0, 16),
     source: item.source,
     url: item.url,
     title: compact(item.title, 220),
@@ -44,7 +43,7 @@ export function toEnrichedArticle(item: ExtractedArticle): EnrichedArticle {
     impactPersonal: trimBullets(impacts.impactPersonal),
     impactScore: score.score,
     scoreRationale: compact(score.rationale, 160),
-    tags,
+    tags: deriveTags(item.title, summaryEl, category),
     confidence,
     fetchedAt: new Date(),
     contentHash: computeHash([item.title, item.accessibleText || item.snippet])

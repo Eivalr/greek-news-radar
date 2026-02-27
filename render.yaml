@@ -4,29 +4,13 @@ services:
     runtime: node
     plan: starter
     autoDeploy: true
-    buildCommand: npm install && npm run prisma:generate && npm run build
-    startCommand: npx prisma db push && npm run start
+    buildCommand: npm install && npm run build
+    startCommand: npm run start
     healthCheckPath: /
     envVars:
       - key: NODE_VERSION
         value: 22.11.0
       - key: NODE_ENV
         value: production
-      - key: DATABASE_URL
-        value: file:/var/data/dev.db
-      - key: NEWS_REFRESH_CRON
-        value: 0 9 * * *
-      - key: NEWS_REFRESH_TIMEZONE
-        value: Europe/Athens
-      - key: SCHEDULER_ENABLED
-        value: "true"
-      - key: SCHEDULER_MODE
-        value: node-cron
       - key: INGESTION_LOOKBACK_HOURS
         value: "36"
-      - key: CRON_SHARED_SECRET
-        generateValue: true
-    disk:
-      name: greek-news-radar-data
-      mountPath: /var/data
-      sizeGB: 1

@@ -1,6 +1,5 @@
 import * as cheerio from "cheerio";
 import Parser from "rss-parser";
-import { Confidence } from "@prisma/client";
 import { env } from "@/app/lib/config";
 import { SOURCE_CONFIGS } from "@/app/lib/ingestion/sources";
 import { ExtractedArticle, RawArticleCandidate, SourceConfig } from "@/app/lib/types";
@@ -208,15 +207,15 @@ export async function discoverCandidates(): Promise<RawArticleCandidate[]> {
     .slice(0, 300);
 }
 
-function detectConfidence(bodyText: string, snippet: string, html: string): Confidence {
+function detectConfidence(bodyText: string, snippet: string, html: string): ExtractedArticle["confidence"] {
   const normalized = `${bodyText} ${snippet}`.toLowerCase();
   const paywallHit = /(subscribe|paywall|συνδρομ|αποκλειστικά για συνδρομητές|premium)/i.test(
     normalized + html.slice(0, 1200)
   );
 
-  if (paywallHit || bodyText.length < 200) return Confidence.LOW;
-  if (bodyText.length < 700) return Confidence.MED;
-  return Confidence.HIGH;
+  if (paywallHit || bodyText.length < 200) return "LOW";
+  if (bodyText.length < 700) return "MED";
+  return "HIGH";
 }
 
 export function parseArticleHtml(candidate: RawArticleCandidate, html: string): ExtractedArticle | null {

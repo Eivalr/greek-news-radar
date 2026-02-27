@@ -1,4 +1,3 @@
-import { Source } from "@prisma/client";
 import fs from "node:fs";
 import path from "node:path";
 import { describe, expect, test } from "vitest";
@@ -12,7 +11,7 @@ describe("parsing and dedupe helpers", () => {
 
     const parsed = parseArticleHtml(
       {
-        source: Source.KATHIMERINI,
+        source: "KATHIMERINI",
         url: "https://www.kathimerini.gr/economy/2026/02/27/sample"
       },
       html

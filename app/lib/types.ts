@@ -1,4 +1,4 @@
-import { Category, Confidence, Source } from "@prisma/client";
+import { Category, Confidence, RadarArticle, Source } from "@/app/lib/domain";
 
 export type SourceConfig = {
   source: Source;
@@ -25,27 +25,7 @@ export type ExtractedArticle = {
   confidence: Confidence;
 };
 
-export type EnrichedArticle = {
-  source: Source;
-  url: string;
-  title: string;
+export type EnrichedArticle = Omit<RadarArticle, "publishedAt" | "fetchedAt"> & {
   publishedAt: Date;
-  category: Category;
-  summaryEl: string;
-  impactGreece: string;
-  impactBusiness: string;
-  impactPersonal: string;
-  impactScore: number;
-  scoreRationale: string;
-  tags: string[];
-  confidence: Confidence;
   fetchedAt: Date;
-  contentHash: string;
-};
-
-export type RefreshStats = {
-  scanned: number;
-  inserted: number;
-  updated: number;
-  deduped: number;
 };

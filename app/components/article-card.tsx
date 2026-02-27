@@ -1,9 +1,9 @@
 "use client";
 
-import type { Article } from "@prisma/client";
+import { RadarArticle } from "@/app/lib/domain";
 
 type Props = {
-  article: Article;
+  article: RadarArticle;
 };
 
 function renderBullets(text: string) {
@@ -14,15 +14,13 @@ function renderBullets(text: string) {
     .slice(0, 3);
 }
 
-function confidenceLabel(confidence: string): string {
+function confidenceLabel(confidence: RadarArticle["confidence"]): string {
   if (confidence === "HIGH") return "High";
   if (confidence === "MED") return "Med";
   return "Low";
 }
 
 export function ArticleCard({ article }: Props) {
-  const tags = Array.isArray(article.tags) ? article.tags.map(String) : [];
-
   return (
     <article className="rounded-xl border border-radar-foam bg-white/95 p-4 shadow-sm">
       <div className="mb-2 flex items-start justify-between gap-3">
@@ -78,11 +76,8 @@ export function ArticleCard({ article }: Props) {
       </div>
 
       <div className="mt-3 flex flex-wrap gap-2">
-        {tags.map((tag) => (
-          <span
-            key={`${article.id}-${tag}`}
-            className="rounded-full bg-radar-foam px-2 py-1 text-xs font-medium text-radar-ink"
-          >
+        {article.tags.map((tag) => (
+          <span key={`${article.id}-${tag}`} className="rounded-full bg-radar-foam px-2 py-1 text-xs font-medium text-radar-ink">
             #{tag}
           </span>
         ))}
