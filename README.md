@@ -42,6 +42,19 @@ npm run dev
 
 Open [http://localhost:3000](http://localhost:3000).
 
+## Deploy on Netlify
+
+1. Push to GitHub (already done for this repo).
+2. In Netlify: `Add new site` -> `Import an existing project`.
+3. Select `Eivalr/greek-news-radar`.
+4. Netlify will use [`netlify.toml`](/Users/vsak/Documents/Personal/Hobbies/Programming/Greek Dashboard/netlify.toml):
+- Build command: `npm run build`
+- Next.js runtime plugin: `@netlify/plugin-nextjs`
+- Node version: `22`
+5. In Site settings -> Environment variables, set:
+- `INGESTION_LOOKBACK_HOURS=36`
+6. Deploy.
+
 ## API
 
 - `GET /api/refresh` -> fetches current snapshot (runs ingestion if empty)
