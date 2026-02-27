@@ -1,0 +1,75 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+enum Source {
+  KATHIMERINI
+  NAFTEMPORIKI
+  OT
+}
+
+enum Category {
+  TRADE
+  TRANSPORT_LOGISTICS
+  ECONOMICS_BUSINESS_MARKETS
+  GEOPOLITICS_SECURITY_ENERGY
+  MAJOR_DAILY_GREEK_NEWS
+}
+
+enum Confidence {
+  HIGH
+  MED
+  LOW
+}
+
+enum RefreshStatus {
+  RUNNING
+  COMPLETED
+  FAILED
+}
+
+model Article {
+  id              String     @id @default(uuid())
+  title           String
+  source          Source
+  url             String     @unique
+  publishedAt     DateTime
+  category        Category
+  summaryEl       String
+  impactGreece    String
+  impactBusiness  String
+  impactPersonal  String
+  impactScore     Int
+  scoreRationale  String
+  tags            Json
+  confidence      Confidence
+  fetchedAt       DateTime
+  contentHash     String
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
+
+  @@index([publishedAt])
+  @@index([category])
+  @@index([source])
+  @@index([impactScore])
+  @@index([contentHash])
+}
+
+model RefreshRun {
+  id          String        @id @default(uuid())
+  status      RefreshStatus
+  mode        String
+  startedAt   DateTime      @default(now())
+  finishedAt  DateTime?
+  message     String?
+  inserted    Int           @default(0)
+  updated     Int           @default(0)
+  deduped     Int           @default(0)
+  scanned     Int           @default(0)
+  error       String?
+}
